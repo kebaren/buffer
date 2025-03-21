@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/textbuffer-targets.cmake")
+
+# Find dependencies
+include(CMakeFindDependencyMacro)
+
+# Check if ICU should be included
+if(@ICU_FOUND@)
+    find_dependency(ICU COMPONENTS uc data)
+endif()
+
+check_required_components(textbuffer) 
