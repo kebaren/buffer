@@ -32,4 +32,8 @@ target_link_libraries(simplest_buffer_test PRIVATE textbuffer)
 
 # Add custom test for insert and delete functions
 add_executable(custom_test custom_test.cpp)
-target_link_libraries(custom_test textbuffer) 
+target_link_libraries(custom_test textbuffer)
+
+# Add TextBuffer wrapper test
+add_executable(textbuffer_test textbuffer_test.cpp)
+target_link_libraries(textbuffer_test textbuffer) 

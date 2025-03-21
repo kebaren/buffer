@@ -22,6 +22,7 @@ set(SOURCES
     src/line_starts.cpp
     src/piece_tree_base.cpp
     src/piece_tree_snapshot.cpp
+    src/textbuffer.cpp
 )
 
 file(GLOB_RECURSE HEADERS "include/*.h")
