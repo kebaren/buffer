@@ -631,35 +631,14 @@ void PieceTreeBase::delete_(int32_t offset, int32_t count) {
         nodesToDel.push_back(node);
     }
 
-    // 查找需要验证CRLF连接的节点
-    TreeNode* prevNode = nullptr;
-    TreeNode* nextNode = nullptr;
-    
-    if (!startNodeEmpty) {
-        prevNode = startNode;
-        nextNode = endNodeEmpty ? endNode->next() : endNode;
-    } else {
-        prevNode = startNode->prev();
-        nextNode = endNodeEmpty ? endNode->next() : endNode;
-    }
+    // 获取要验证的前置节点 - 简化为VSCode的逻辑
+    TreeNode* prev = startNodeEmpty ? startNode->prev() : startNode;
     
     // 先删除需要删除的节点
     deleteNodes(nodesToDel);
     
-    // 然后再验证CRLF连接
-    // 确保前节点有效
-    if (prevNode && prevNode != SENTINEL) {
-        if (nextNode && nextNode != SENTINEL) {
-            // 验证前后节点的CRLF连接
-            if (shouldCheckCRLF() && endWithCR(prevNode) && startWithLF(nextNode)) {
-                // 处理CRLF连接
-                handleCRLFJoin(prevNode, nextNode);
-            }
-        }
-    } else if (nextNode && nextNode != SENTINEL) {
-        // 只有后节点有效
-        validateCRLFWithPrevNode(nextNode);
-    }
+    // 验证CRLF连接
+    validateCRLFWithNextNode(prev);
     
     computeBufferMetadata();
 }
@@ -674,45 +653,62 @@ void PieceTreeBase::handleCRLFJoin(TreeNode* prevNode, TreeNode* nextNode) {
         return;  // 没有CRLF需要处理
     }
     
-    // 调整前节点删除最后的\r
-    Piece* prevPiece = prevNode->piece;
-    BufferCursor originalEnd = prevPiece->end;
-    int32_t originalLength = prevPiece->length;
-    int32_t originalLFCnt = prevPiece->lineFeedCnt;
+    std::vector<TreeNode*> nodesToDel;
     
-    // 获取前节点最后位置的前一个位置（去掉\r）
+    // 调整前节点删除最后的\r
+    const std::vector<int32_t>& lineStarts = _buffers[prevNode->piece->bufferIndex].lineStarts;
     BufferCursor newEnd;
-    if (prevPiece->end.column > 0) {
-        newEnd = {prevPiece->end.line, prevPiece->end.column - 1};
-    } else if (prevPiece->end.line > 0) {
-        // 需要回到前一行的末尾
-        int32_t prevLineIndex = prevPiece->end.line - 1;
-        int32_t prevLineLength = _buffers[prevPiece->bufferIndex].lineStarts[prevPiece->end.line] - 
-                              _buffers[prevPiece->bufferIndex].lineStarts[prevLineIndex];
-        newEnd = {prevLineIndex, prevLineLength};
+    
+    if (prevNode->piece->end.column == 0) {
+        // 行尾是 \r，而不是 \r\n
+        newEnd = {prevNode->piece->end.line - 1, 
+                 lineStarts[prevNode->piece->end.line] - lineStarts[prevNode->piece->end.line - 1] - 1};
     } else {
-        // 无法调整，避免无效操作
-        return;
+        // \r\n
+        newEnd = {prevNode->piece->end.line, prevNode->piece->end.column - 1};
     }
     
-    int32_t newLength = originalLength - 1;
-    int32_t newLFCnt = getLineFeedCnt(prevPiece->bufferIndex, prevPiece->start, newEnd);
-    int32_t lf_delta = newLFCnt - originalLFCnt;
+    const int32_t prevNewLength = prevNode->piece->length - 1;
+    const int32_t prevNewLFCnt = prevNode->piece->lineFeedCnt - 1;
     
-    Piece* newPiece = new Piece(
-        prevPiece->bufferIndex,
-        prevPiece->start,
+    Piece* newPrevPiece = new Piece(
+        prevNode->piece->bufferIndex,
+        prevNode->piece->start,
         newEnd,
-        newLFCnt,
-        newLength
+        prevNewLFCnt,
+        prevNewLength
     );
     
     delete prevNode->piece;
-    prevNode->piece = newPiece;
-    updateTreeMetadata(this, prevNode, -1, lf_delta);
+    prevNode->piece = newPrevPiece;
     
-    // 调整后节点，将第一个\n变为\r\n
-    // 这里我们不实际修改后节点内容，而是在逻辑上使其与前节点连接正确
+    updateTreeMetadata(this, prevNode, -1, -1);
+    if (prevNode->piece->length == 0) {
+        nodesToDel.push_back(prevNode);
+    }
+    
+    // 调整后节点，删除开头的\n
+    BufferCursor newStart{nextNode->piece->start.line + 1, 0};
+    const int32_t newLength = nextNode->piece->length - 1;
+    const int32_t newLineFeedCnt = getLineFeedCnt(nextNode->piece->bufferIndex, newStart, nextNode->piece->end);
+    
+    Piece* newNextPiece = new Piece(
+        nextNode->piece->bufferIndex,
+        newStart,
+        nextNode->piece->end,
+        newLineFeedCnt,
+        newLength
+    );
+    
+    delete nextNode->piece;
+    nextNode->piece = newNextPiece;
+    
+    updateTreeMetadata(this, nextNode, -1, -1);
+    if (nextNode->piece->length == 0) {
+        nodesToDel.push_back(nextNode);
+    }
+    
+    deleteNodes(nodesToDel);
 }
 
 void PieceTreeBase::insertContentToNodeLeft(const std::string& value, TreeNode* node) {
